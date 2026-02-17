@@ -481,6 +481,7 @@ struct vox_stream {
     int64_t segment_end_sample;    /* sample position at last token in segment */
     int segment_has_timestamp;     /* 1 if timestamp is available for current segment */
     int segment_timestamp_output;  /* 1 if timestamp has been output for this segment */
+    int last_encoder_mel_cursor;   /* mel_cursor before last encoder run (for chunk tracking) */
 };
 
 typedef enum stream_tok_class {
@@ -754,9 +755,10 @@ static void stream_reset_decoder_state(vox_stream_t *s) {
     s->text_since_restart = 0;
     s->waiting_prompt = 0;
 
-    /* Reset timestamp for new segment */
-    s->segment_has_timestamp = 0;
-    s->segment_timestamp_output = 0;
+    /* Note: We do NOT reset segment timestamp tracking here.
+     * Timestamps are set by the encoder (per chunk), not by decoder state.
+     * The decoder reset might happen mid-chunk (EOS, overflow, etc.) but
+     * the chunk timestamp should still be output for any tokens generated. */
 }
 
 /* Reset full live-stream state (mel/conv/encoder/decoder). */
@@ -804,6 +806,11 @@ static void stream_run_encoder(vox_stream_t *s) {
 
     if (new_mel < need_mel && !s->finished) return;
     if (new_mel <= 0) return;
+
+    /* Track chunk boundaries for timestamp output.
+     * This encoder run will process mel from last_encoder_mel_cursor to mel_cursor.
+     * Each mel frame = VOX_HOP_LENGTH (160) samples. */
+    int prev_mel_cursor = s->last_encoder_mel_cursor;
 
     struct timeval t0, t1;
     gettimeofday(&t0, NULL);
@@ -914,6 +921,18 @@ static void stream_run_encoder(vox_stream_t *s) {
                 new_mel, conv_out_len, usable, s->total_adapter, leftover);
 
     vox_mel_discard_before(s->mel_ctx, s->mel_cursor);
+    
+    /* Update timestamp tracking for this encoder chunk.
+     * The chunk processed audio from prev_mel_cursor to s->mel_cursor.
+     * Convert mel frames to samples: mel_frame * VOX_HOP_LENGTH (160). */
+    s->segment_start_sample = (int64_t)prev_mel_cursor * VOX_HOP_LENGTH;
+    s->segment_end_sample = (int64_t)s->mel_cursor * VOX_HOP_LENGTH;
+    s->last_encoder_mel_cursor = s->mel_cursor;
+    
+    /* Mark that a new segment timestamp is available.
+     * Reset output flag so this chunk's timestamp will be shown. */
+    s->segment_has_timestamp = 1;
+    s->segment_timestamp_output = 0;
 }
 
 /* Build alternatives array from logits. alts[0]=best (already decoded as best_token).
@@ -996,19 +1015,6 @@ static void stream_run_decoder(vox_stream_t *s) {
     if (!s->decoder_started && cur_adapter >= prompt_len) {
         s->waiting_prompt = 0;
         gettimeofday(&t0, NULL);
-
-        /* Mark segment start based on adapter position.
-         * Each adapter token corresponds to RAW_AUDIO_LENGTH_PER_TOK (1280) samples
-         * at 16kHz sample rate, which equals 80ms of audio. */
-        s->segment_start_sample = (int64_t)s->adapter_pos_offset * RAW_AUDIO_LENGTH_PER_TOK;
-        
-        /* For segment end, use the actual audio samples fed so far.
-         * This works correctly for both file mode (all audio fed upfront)
-         * and streaming mode (audio fed incrementally). */
-        s->segment_end_sample = s->real_samples_fed;
-        
-        s->segment_has_timestamp = 1;
-        s->segment_timestamp_output = 0;
 
         float *prompt_embeds = (float *)malloc((size_t)prompt_len * dim * sizeof(float));
         if (!prompt_embeds) return;
