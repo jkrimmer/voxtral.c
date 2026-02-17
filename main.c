@@ -46,6 +46,7 @@ static void usage(const char *prog) {
 static int first_token = 1;
 static float alt_cutoff = -1; /* <0 means disabled */
 static int show_timestamps = 0; /* 1 if --timestamps flag is set */
+static int first_segment = 1; /* Track first segment for newline handling */
 
 /* Format timestamp in HH:MM:SS.mmm format */
 static void format_timestamp(double seconds, char *buf, size_t bufsize) {
@@ -63,7 +64,6 @@ static void drain_tokens(vox_stream_t *s) {
         double start_sec, end_sec;
         if (vox_stream_get_timestamp(s, &start_sec, &end_sec)) {
             /* End previous segment with newline (except for very first segment) */
-            static int first_segment = 1;
             if (!first_segment) {
                 printf("\n");
             }

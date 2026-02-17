@@ -997,7 +997,9 @@ static void stream_run_decoder(vox_stream_t *s) {
         s->waiting_prompt = 0;
         gettimeofday(&t0, NULL);
 
-        /* Mark segment start based on adapter position (each adapter token ~80ms of audio) */
+        /* Mark segment start based on adapter position.
+         * Each adapter token corresponds to RAW_AUDIO_LENGTH_PER_TOK (1280) samples
+         * at 16kHz sample rate, which equals 80ms of audio. */
         s->segment_start_sample = (int64_t)s->adapter_pos_offset * RAW_AUDIO_LENGTH_PER_TOK;
         s->segment_has_timestamp = 1;
         s->segment_timestamp_output = 0;
@@ -1027,6 +1029,8 @@ static void stream_run_decoder(vox_stream_t *s) {
         s->prev_token = vox_decoder_forward(s->ctx, s->step_embed, s->logits);
         s->n_generated++;
         s->last_decode_sample = s->real_samples_fed;
+        /* Segment end uses prompt_len position as the decoder just consumed these tokens.
+         * In the generation loop below, we'll update to gen_pos as we advance. */
         s->segment_end_sample = (int64_t)(s->adapter_pos_offset + prompt_len) * RAW_AUDIO_LENGTH_PER_TOK;
 
         /* Enqueue only if this token decodes to visible text */
@@ -1079,6 +1083,8 @@ static void stream_run_decoder(vox_stream_t *s) {
             s->prev_token = vox_decoder_forward(s->ctx, s->step_embed, s->logits);
             s->n_generated++;
             s->last_decode_sample = s->real_samples_fed;
+            /* Update segment end to current generation position.
+             * gen_pos tracks the next adapter position to decode. */
             s->segment_end_sample = (int64_t)s->gen_pos * RAW_AUDIO_LENGTH_PER_TOK;
 
             stream_tok_class_t cls = stream_classify_token(s, s->prev_token);
