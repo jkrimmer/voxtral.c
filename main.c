@@ -59,29 +59,33 @@ static void format_timestamp(double seconds, char *buf, size_t bufsize) {
 }
 
 static void drain_tokens(vox_stream_t *s) {
-    /* Check if we have a new segment timestamp to output */
-    if (show_timestamps) {
-        double start_sec, end_sec;
-        if (vox_stream_get_timestamp(s, &start_sec, &end_sec)) {
-            /* End previous segment with newline (except for very first segment) */
-            if (!first_segment) {
-                printf("\n");
-            }
-            first_segment = 0;
-            
-            char start_buf[32], end_buf[32];
-            format_timestamp(start_sec, start_buf, sizeof(start_buf));
-            format_timestamp(end_sec, end_buf, sizeof(end_buf));
-            printf("[%s --> %s] ", start_buf, end_buf);
-            fflush(stdout);
-        }
-    }
-
     if (alt_cutoff < 0) {
         /* Fast path: no alternatives */
         const char *tokens[64];
         int n;
+        
+        /* Check if we have a new segment timestamp to output.
+         * Only output timestamp when we actually have tokens to show. */
+        int first_batch = 1;
         while ((n = vox_stream_get(s, tokens, 64)) > 0) {
+            if (show_timestamps && first_batch) {
+                double start_sec, end_sec;
+                if (vox_stream_get_timestamp(s, &start_sec, &end_sec)) {
+                    /* End previous segment with newline (except for very first segment) */
+                    if (!first_segment) {
+                        printf("\n");
+                    }
+                    first_segment = 0;
+                    
+                    char start_buf[32], end_buf[32];
+                    format_timestamp(start_sec, start_buf, sizeof(start_buf));
+                    format_timestamp(end_sec, end_buf, sizeof(end_buf));
+                    printf("[%s --> %s] ", start_buf, end_buf);
+                    fflush(stdout);
+                }
+                first_batch = 0;
+            }
+            
             for (int i = 0; i < n; i++) {
                 const char *t = tokens[i];
                 if (first_token) {
@@ -97,7 +101,29 @@ static void drain_tokens(vox_stream_t *s) {
         const int n_alt = 3;
         const char *tokens[64 * 3];
         int n;
+        
+        /* Check if we have a new segment timestamp to output.
+         * Only output timestamp when we actually have tokens to show. */
+        int first_batch = 1;
         while ((n = vox_stream_get_alt(s, tokens, 64, n_alt)) > 0) {
+            if (show_timestamps && first_batch) {
+                double start_sec, end_sec;
+                if (vox_stream_get_timestamp(s, &start_sec, &end_sec)) {
+                    /* End previous segment with newline (except for very first segment) */
+                    if (!first_segment) {
+                        printf("\n");
+                    }
+                    first_segment = 0;
+                    
+                    char start_buf[32], end_buf[32];
+                    format_timestamp(start_sec, start_buf, sizeof(start_buf));
+                    format_timestamp(end_sec, end_buf, sizeof(end_buf));
+                    printf("[%s --> %s] ", start_buf, end_buf);
+                    fflush(stdout);
+                }
+                first_batch = 0;
+            }
+            
             for (int i = 0; i < n; i++) {
                 const char *best = tokens[i * n_alt];
                 if (!best) continue;
