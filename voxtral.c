@@ -475,6 +475,11 @@ struct vox_stream {
     double prefill_ms;
     int n_generated;
     int n_text_tokens;          /* tokens emitted as visible text */
+
+    /* Timestamp tracking for segments */
+    int64_t segment_start_sample;  /* sample position at segment start */
+    int64_t segment_end_sample;    /* sample position at last token in segment */
+    int segment_has_timestamp;     /* 1 if timestamp is available for current segment */
 };
 
 typedef enum stream_tok_class {
@@ -747,6 +752,9 @@ static void stream_reset_decoder_state(vox_stream_t *s) {
     s->nontext_streak = 0;
     s->text_since_restart = 0;
     s->waiting_prompt = 0;
+
+    /* Mark timestamp as consumed when restarting decoder */
+    s->segment_has_timestamp = 0;
 }
 
 /* Reset full live-stream state (mel/conv/encoder/decoder). */
@@ -987,6 +995,10 @@ static void stream_run_decoder(vox_stream_t *s) {
         s->waiting_prompt = 0;
         gettimeofday(&t0, NULL);
 
+        /* Mark segment start at the beginning of this decoding session */
+        s->segment_start_sample = s->real_samples_fed;
+        s->segment_has_timestamp = 1;
+
         float *prompt_embeds = (float *)malloc((size_t)prompt_len * dim * sizeof(float));
         if (!prompt_embeds) return;
 
@@ -1012,6 +1024,7 @@ static void stream_run_decoder(vox_stream_t *s) {
         s->prev_token = vox_decoder_forward(s->ctx, s->step_embed, s->logits);
         s->n_generated++;
         s->last_decode_sample = s->real_samples_fed;
+        s->segment_end_sample = s->real_samples_fed;
 
         /* Enqueue only if this token decodes to visible text */
         stream_tok_class_t cls = stream_classify_token(s, s->prev_token);
@@ -1063,6 +1076,7 @@ static void stream_run_decoder(vox_stream_t *s) {
             s->prev_token = vox_decoder_forward(s->ctx, s->step_embed, s->logits);
             s->n_generated++;
             s->last_decode_sample = s->real_samples_fed;
+            s->segment_end_sample = s->real_samples_fed;
 
             stream_tok_class_t cls = stream_classify_token(s, s->prev_token);
             if (cls == STREAM_TOK_TEXT) {
@@ -1298,6 +1312,19 @@ int vox_stream_get_alt(vox_stream_t *s, const char **out_tokens,
         s->queue_head = (s->queue_head + 1) % s->queue_cap;
     }
     return count;
+}
+
+int vox_stream_get_timestamp(vox_stream_t *s, double *start_sec, double *end_sec) {
+    if (!s || !start_sec || !end_sec) return 0;
+    if (!s->segment_has_timestamp) return 0;
+    
+    *start_sec = (double)s->segment_start_sample / VOX_SAMPLE_RATE;
+    *end_sec = (double)s->segment_end_sample / VOX_SAMPLE_RATE;
+    
+    /* Mark timestamp as consumed after retrieving it */
+    s->segment_has_timestamp = 0;
+    
+    return 1;
 }
 
 void vox_stream_free(vox_stream_t *s) {
