@@ -480,6 +480,7 @@ struct vox_stream {
     int64_t segment_start_sample;  /* sample position at segment start */
     int64_t segment_end_sample;    /* sample position at last token in segment */
     int segment_has_timestamp;     /* 1 if timestamp is available for current segment */
+    int segment_timestamp_output;  /* 1 if timestamp has been output for this segment */
 };
 
 typedef enum stream_tok_class {
@@ -753,8 +754,9 @@ static void stream_reset_decoder_state(vox_stream_t *s) {
     s->text_since_restart = 0;
     s->waiting_prompt = 0;
 
-    /* Mark timestamp as consumed when restarting decoder */
+    /* Reset timestamp for new segment */
     s->segment_has_timestamp = 0;
+    s->segment_timestamp_output = 0;
 }
 
 /* Reset full live-stream state (mel/conv/encoder/decoder). */
@@ -998,6 +1000,7 @@ static void stream_run_decoder(vox_stream_t *s) {
         /* Mark segment start at the beginning of this decoding session */
         s->segment_start_sample = s->real_samples_fed;
         s->segment_has_timestamp = 1;
+        s->segment_timestamp_output = 0;
 
         float *prompt_embeds = (float *)malloc((size_t)prompt_len * dim * sizeof(float));
         if (!prompt_embeds) return;
@@ -1316,13 +1319,13 @@ int vox_stream_get_alt(vox_stream_t *s, const char **out_tokens,
 
 int vox_stream_get_timestamp(vox_stream_t *s, double *start_sec, double *end_sec) {
     if (!s || !start_sec || !end_sec) return 0;
-    if (!s->segment_has_timestamp) return 0;
+    if (!s->segment_has_timestamp || s->segment_timestamp_output) return 0;
     
     *start_sec = (double)s->segment_start_sample / VOX_SAMPLE_RATE;
     *end_sec = (double)s->segment_end_sample / VOX_SAMPLE_RATE;
     
-    /* Mark timestamp as consumed after retrieving it */
-    s->segment_has_timestamp = 0;
+    /* Mark timestamp as output for this segment */
+    s->segment_timestamp_output = 1;
     
     return 1;
 }
