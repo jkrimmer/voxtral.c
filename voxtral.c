@@ -1001,6 +1001,12 @@ static void stream_run_decoder(vox_stream_t *s) {
          * Each adapter token corresponds to RAW_AUDIO_LENGTH_PER_TOK (1280) samples
          * at 16kHz sample rate, which equals 80ms of audio. */
         s->segment_start_sample = (int64_t)s->adapter_pos_offset * RAW_AUDIO_LENGTH_PER_TOK;
+        
+        /* For segment end, use the actual audio samples fed so far.
+         * This works correctly for both file mode (all audio fed upfront)
+         * and streaming mode (audio fed incrementally). */
+        s->segment_end_sample = s->real_samples_fed;
+        
         s->segment_has_timestamp = 1;
         s->segment_timestamp_output = 0;
 
@@ -1029,9 +1035,6 @@ static void stream_run_decoder(vox_stream_t *s) {
         s->prev_token = vox_decoder_forward(s->ctx, s->step_embed, s->logits);
         s->n_generated++;
         s->last_decode_sample = s->real_samples_fed;
-        /* Segment end uses prompt_len position as the decoder just consumed these tokens.
-         * In the generation loop below, we'll update to gen_pos as we advance. */
-        s->segment_end_sample = (int64_t)(s->adapter_pos_offset + prompt_len) * RAW_AUDIO_LENGTH_PER_TOK;
 
         /* Enqueue only if this token decodes to visible text */
         stream_tok_class_t cls = stream_classify_token(s, s->prev_token);
@@ -1083,9 +1086,6 @@ static void stream_run_decoder(vox_stream_t *s) {
             s->prev_token = vox_decoder_forward(s->ctx, s->step_embed, s->logits);
             s->n_generated++;
             s->last_decode_sample = s->real_samples_fed;
-            /* Update segment end to current generation position.
-             * gen_pos tracks the next adapter position to decode. */
-            s->segment_end_sample = (int64_t)s->gen_pos * RAW_AUDIO_LENGTH_PER_TOK;
 
             stream_tok_class_t cls = stream_classify_token(s, s->prev_token);
             if (cls == STREAM_TOK_TEXT) {
@@ -1327,22 +1327,8 @@ int vox_stream_get_timestamp(vox_stream_t *s, double *start_sec, double *end_sec
     if (!s || !start_sec || !end_sec) return 0;
     if (!s->segment_has_timestamp || s->segment_timestamp_output) return 0;
     
-    /* Don't output timestamp until generation completes for this segment.
-     * If decoder is active and gen_pos hasn't caught up to total_adapter,
-     * we're still generating tokens and segment_end_sample will be updated. */
-    if (s->decoder_started && !s->eos_seen && s->gen_pos < s->total_adapter) {
-        return 0;  /* Still generating, wait for completion */
-    }
-    
     *start_sec = (double)s->segment_start_sample / VOX_SAMPLE_RATE;
-    
-    /* Cap end time at actual audio fed to avoid showing time beyond real audio duration.
-     * Adapter tokens may include padding beyond actual audio. */
-    int64_t end_sample = s->segment_end_sample;
-    if (end_sample > s->real_samples_fed) {
-        end_sample = s->real_samples_fed;
-    }
-    *end_sec = (double)end_sample / VOX_SAMPLE_RATE;
+    *end_sec = (double)s->segment_end_sample / VOX_SAMPLE_RATE;
     
     /* Mark timestamp as output for this segment */
     s->segment_timestamp_output = 1;
