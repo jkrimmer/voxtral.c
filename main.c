@@ -62,6 +62,13 @@ static void drain_tokens(vox_stream_t *s) {
     if (show_timestamps) {
         double start_sec, end_sec;
         if (vox_stream_get_timestamp(s, &start_sec, &end_sec)) {
+            /* End previous segment with newline (except for very first segment) */
+            static int first_segment = 1;
+            if (!first_segment) {
+                printf("\n");
+            }
+            first_segment = 0;
+            
             char start_buf[32], end_buf[32];
             format_timestamp(start_sec, start_buf, sizeof(start_buf));
             format_timestamp(end_sec, end_buf, sizeof(end_buf));

@@ -997,8 +997,8 @@ static void stream_run_decoder(vox_stream_t *s) {
         s->waiting_prompt = 0;
         gettimeofday(&t0, NULL);
 
-        /* Mark segment start at the beginning of this decoding session */
-        s->segment_start_sample = s->real_samples_fed;
+        /* Mark segment start based on adapter position (each adapter token ~80ms of audio) */
+        s->segment_start_sample = (int64_t)s->adapter_pos_offset * RAW_AUDIO_LENGTH_PER_TOK;
         s->segment_has_timestamp = 1;
         s->segment_timestamp_output = 0;
 
@@ -1027,7 +1027,7 @@ static void stream_run_decoder(vox_stream_t *s) {
         s->prev_token = vox_decoder_forward(s->ctx, s->step_embed, s->logits);
         s->n_generated++;
         s->last_decode_sample = s->real_samples_fed;
-        s->segment_end_sample = s->real_samples_fed;
+        s->segment_end_sample = (int64_t)(s->adapter_pos_offset + prompt_len) * RAW_AUDIO_LENGTH_PER_TOK;
 
         /* Enqueue only if this token decodes to visible text */
         stream_tok_class_t cls = stream_classify_token(s, s->prev_token);
@@ -1079,7 +1079,7 @@ static void stream_run_decoder(vox_stream_t *s) {
             s->prev_token = vox_decoder_forward(s->ctx, s->step_embed, s->logits);
             s->n_generated++;
             s->last_decode_sample = s->real_samples_fed;
-            s->segment_end_sample = s->real_samples_fed;
+            s->segment_end_sample = (int64_t)s->gen_pos * RAW_AUDIO_LENGTH_PER_TOK;
 
             stream_tok_class_t cls = stream_classify_token(s, s->prev_token);
             if (cls == STREAM_TOK_TEXT) {
