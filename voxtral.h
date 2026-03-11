@@ -268,6 +268,12 @@ void vox_stream_set_alt(vox_stream_t *s, int n_alt, float cutoff);
 int vox_stream_get_alt(vox_stream_t *s, const char **out_tokens,
                        int max_tokens, int n_alt);
 
+/* Get timestamp information for the current segment. Returns 1 if timestamp
+ * is available, 0 otherwise. start_sec and end_sec are set to the start and
+ * end time in seconds of the current segment.
+ * Call this before retrieving tokens to get the timestamp for those tokens. */
+int vox_stream_get_timestamp(vox_stream_t *s, double *start_sec, double *end_sec);
+
 /* Set minimum time between encoder runs, in seconds.
  * Lower = more responsive streaming (higher GPU overhead).
  * Higher = more efficient batching (higher latency).

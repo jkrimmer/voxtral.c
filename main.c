@@ -35,6 +35,7 @@ static void usage(const char *prog) {
     fprintf(stderr, "\nOptions:\n");
     fprintf(stderr, "  -I <secs>     Encoder processing interval in seconds (default: 2.0)\n");
     fprintf(stderr, "  --alt <c>     Show alternative tokens within cutoff distance (0.0-1.0)\n");
+    fprintf(stderr, "  --timestamps  Output timing information for each segment\n");
     fprintf(stderr, "  --monitor     Show non-intrusive symbols inline with output (stderr)\n");
     fprintf(stderr, "  --debug       Debug output (per-layer, per-chunk details)\n");
     fprintf(stderr, "  --silent      No status output (only transcription on stdout)\n");
@@ -44,13 +45,47 @@ static void usage(const char *prog) {
 /* Drain pending tokens from stream and print to stdout */
 static int first_token = 1;
 static float alt_cutoff = -1; /* <0 means disabled */
+static int show_timestamps = 0; /* 1 if --timestamps flag is set */
+static int first_segment = 1; /* Track first segment for newline handling */
+
+/* Format timestamp in HH:MM:SS.mmm format */
+static void format_timestamp(double seconds, char *buf, size_t bufsize) {
+    int hours = (int)(seconds / 3600);
+    int minutes = (int)((seconds - hours * 3600) / 60);
+    double secs = seconds - hours * 3600 - minutes * 60;
+    int sec_int = (int)secs;
+    int millisec = (int)((secs - sec_int) * 1000);
+    snprintf(buf, bufsize, "%02d:%02d:%02d.%03d", hours, minutes, sec_int, millisec);
+}
 
 static void drain_tokens(vox_stream_t *s) {
     if (alt_cutoff < 0) {
         /* Fast path: no alternatives */
         const char *tokens[64];
         int n;
+        
+        /* Check if we have a new segment timestamp to output.
+         * Only output timestamp when we actually have tokens to show. */
+        int first_batch = 1;
         while ((n = vox_stream_get(s, tokens, 64)) > 0) {
+            if (show_timestamps && first_batch) {
+                double start_sec, end_sec;
+                if (vox_stream_get_timestamp(s, &start_sec, &end_sec)) {
+                    /* End previous segment with newline (except for very first segment) */
+                    if (!first_segment) {
+                        printf("\n");
+                    }
+                    first_segment = 0;
+                    
+                    char start_buf[32], end_buf[32];
+                    format_timestamp(start_sec, start_buf, sizeof(start_buf));
+                    format_timestamp(end_sec, end_buf, sizeof(end_buf));
+                    printf("[%s --> %s] ", start_buf, end_buf);
+                    fflush(stdout);
+                }
+                first_batch = 0;
+            }
+            
             for (int i = 0; i < n; i++) {
                 const char *t = tokens[i];
                 if (first_token) {
@@ -66,7 +101,29 @@ static void drain_tokens(vox_stream_t *s) {
         const int n_alt = 3;
         const char *tokens[64 * 3];
         int n;
+        
+        /* Check if we have a new segment timestamp to output.
+         * Only output timestamp when we actually have tokens to show. */
+        int first_batch = 1;
         while ((n = vox_stream_get_alt(s, tokens, 64, n_alt)) > 0) {
+            if (show_timestamps && first_batch) {
+                double start_sec, end_sec;
+                if (vox_stream_get_timestamp(s, &start_sec, &end_sec)) {
+                    /* End previous segment with newline (except for very first segment) */
+                    if (!first_segment) {
+                        printf("\n");
+                    }
+                    first_segment = 0;
+                    
+                    char start_buf[32], end_buf[32];
+                    format_timestamp(start_sec, start_buf, sizeof(start_buf));
+                    format_timestamp(end_sec, end_buf, sizeof(end_buf));
+                    printf("[%s --> %s] ", start_buf, end_buf);
+                    fflush(stdout);
+                }
+                first_batch = 0;
+            }
+            
             for (int i = 0; i < n; i++) {
                 const char *best = tokens[i * n_alt];
                 if (!best) continue;
@@ -146,6 +203,8 @@ int main(int argc, char **argv) {
             use_stdin = 1;
         } else if (strcmp(argv[i], "--from-mic") == 0) {
             use_mic = 1;
+        } else if (strcmp(argv[i], "--timestamps") == 0) {
+            show_timestamps = 1;
         } else if (strcmp(argv[i], "--monitor") == 0) {
             extern int vox_monitor;
             vox_monitor = 1;

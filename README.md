@@ -25,8 +25,14 @@ make mps       # Apple Silicon (fastest)
 # Transcribe audio (tokens stream to stdout as generated)
 ./voxtral -d voxtral-model -i audio.wav
 
+# With timestamps for each segment
+./voxtral -d voxtral-model -i audio.wav --timestamps
+
 # Live microphone transcription (macOS, Ctrl+C to stop)
 ./voxtral -d voxtral-model --from-mic
+
+# Microphone with timestamps
+./voxtral -d voxtral-model --from-mic --timestamps
 
 # Pipe any format via ffmpeg
 ffmpeg -i audio.mp3 -f s16le -ar 16000 -ac 1 - 2>/dev/null | \
@@ -88,6 +94,29 @@ Hello, this is a test of the[ V| Vo]ox[T|tral]roll speech-to-text system.
 ```
 
 The cutoff (0.0–1.0) controls how close an alternative must be to the best token. A token qualifies if `1 - prob[i]/prob[0] <= cutoff`. Lower values show only very close alternatives, higher values are more permissive.
+
+### Timestamps
+
+The `--timestamps` flag outputs timing information for each transcribed segment:
+
+```bash
+./voxtral -d voxtral-model -i audio.wav --timestamps
+[00:00:00.000 --> 00:00:02.450] Hello, this is a test
+[00:00:02.450 --> 00:00:05.120] of the voxtral speech to text system.
+```
+
+Timestamps are in `[HH:MM:SS.mmm --> HH:MM:SS.mmm]` format, showing the start and end time of the audio segment that produced each group of tokens. A "segment" corresponds to tokens generated before the decoder restarts (typically aligned with the processing interval set by `-I`).
+
+Timestamps work with all input modes:
+- **File input**: Calculated from sample count (16kHz mono)
+- **Stdin input**: Calculated from samples streamed
+- **Microphone input**: Based on real-time audio capture
+
+Combine with other flags:
+```bash
+./voxtral -d voxtral-model -i audio.wav --timestamps --alt 0.5
+[00:00:00.000 --> 00:00:01.850] Hello [this|that] is a test
+```
 
 ### Processing Interval (`-I`)
 
